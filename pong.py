@@ -3,6 +3,7 @@ import pygame
 import socket
 from threading import Thread
 import time
+import random
      
 pygame.init()
 pygame.display.set_caption("PONG")
@@ -12,14 +13,90 @@ SCREEN_WIDTH = 1300
 SCREEN_HEIGHT = 700
 screen = pygame.display.set_mode((SCREEN_WIDTH,SCREEN_HEIGHT))
 pygame.mouse.set_visible(False)
-enemyPos = [0,0]
+enemyPos = [0,0] # x, y
 playerPos = [0,0]
+score = [0,0] #[my score, enemy score]
 
+class Player:
+    playerWidth, playerHeight = (10, 70)
+    rect_offset = (-playerWidth/2, -playerHeight/2)
+
+    def __init__(self, isEnemy):
+        self.x_pos, self.y_pos = pygame.mouse.get_pos()
+        self.x_pos = SCREEN_WIDTH - 100
+        self.rect = pygame.Rect(1, 1, self.playerWidth, self.playerHeight)
+        self.isEnemy = isEnemy
+
+    def update(self):
+        global playerPos
+        if (self.isEnemy == False):
+            #update(left, top, width, height)
+            #self.x_pos, self.y_pos = tuple(map(sum, zip(pygame.mouse.get_pos(), self.rect_offset)))
+            self.y_pos = pygame.mouse.get_pos()[1] + self.rect_offset[1]
+            if(self.x_pos < SCREEN_WIDTH/2):
+                pygame.mouse.set_pos([SCREEN_WIDTH/2, pygame.mouse.get_pos()[1]])
+                self.x_pos = SCREEN_WIDTH/2
+            playerPos[0] = self.x_pos
+            playerPos[1] = self.y_pos
+            self.rect.update(self.x_pos, self.y_pos, self.playerWidth, self.playerHeight)
+            pygame.draw.rect(screen, (255, 255, 255), self.rect)
+        
+        else:
+            self.x_pos = SCREEN_WIDTH - enemyPos[0]
+            self.y_pos = enemyPos[1]
+            self.rect.update(self.x_pos, self.y_pos, self.playerWidth, self.playerHeight)
+            pygame.draw.rect(screen, (255, 0, 0), self.rect)
+
+player = Player(False)
+enemyPlayer = Player(True)
+
+class Ball():
+    def __init__(self):
+        global ballPos
+        self.x_pos, self.y_pos = (SCREEN_WIDTH/2, SCREEN_HEIGHT/2)
+        ballPos = [self.x_pos, self.y_pos]
+        self.radius = 5
+        self.speed_x, self.speed_y = (10, 1.5)
+        self.delta_t = 0.01
+        self.lastTime = time.time()
+    
+    def update(self):
+        global score
+
+        if (time.time() - self.lastTime >= self.delta_t):
+            self.x_pos += self.speed_x
+            self.y_pos += self.speed_y
+            self.lastTime = time.time()
+        
+        #collisions with walls
+        if (self.x_pos >= SCREEN_WIDTH):
+            score[1] += 1
+            self.speed_x = self.speed_x * -1.0
+        if (self.x_pos <= 0):
+            score[0] += 1
+            self.speed_x = self.speed_x * -1.0
+        if (self.y_pos <= 0 or self.y_pos >= SCREEN_HEIGHT):
+            self.speed_y = self.speed_y * -1.0
+        
+        #collisions with paddles
+        playerCollision = player.rect.collidepoint((self.x_pos, self.y_pos))
+        enemyCollision = enemyPlayer.rect.collidepoint((self.x_pos, self.y_pos))
+        if (playerCollision or enemyCollision):
+            self.speed_x = self.speed_x * -1.0
+            self.speed_y = (self.speed_y + 3.5 * ((random.randint(-1000, 1000)) / 1000))
+            self.speed_y = 0 if abs(self.speed_y) > 7 else self.speed_y
+        
+        pygame.draw.circle(screen, (255, 255, 255), (self.x_pos, self.y_pos), self.radius)
+
+ball = Ball()
 
 closing = False
 connection = False
 def networking():
     global enemyPos, connection
+
+    #number of packets sent
+    numPackets = 0
 
     #host or join
     join_option = input("OPTIONS:\nTo Join A Game, Enter 'Join'\nTo Host A Game, Enter 'Host'\n~")
@@ -58,7 +135,13 @@ def networking():
             resp_arr[0] = int(resp_arr[0].split('.')[0])
             resp_arr[1] = int(resp_arr[1].split('.')[0])
             enemyPos = [resp_arr[0], resp_arr[1]]
-            sleep(0.01)
+
+            resp_arr[2] = int(resp_arr[2].split('.')[0])
+            resp_arr[3] = int(resp_arr[3].split('.')[0])
+            ball.x_pos = -1.0 * (resp_arr[2] - SCREEN_WIDTH)
+            ball.y_pos = resp_arr[3]
+
+            sleep(0.005)
             connection = True
 
             if (closing):
@@ -67,7 +150,7 @@ def networking():
 
     if(join_option.lower() == "host"):
         while True:
-            comm_socket.send(f"{playerPos[0]},{playerPos[1]}".encode('ascii'))
+            comm_socket.send(f"{playerPos[0]},{playerPos[1]},{ball.x_pos},{ball.y_pos}".encode('ascii'))
 
             resp = comm_socket.recv(1024).decode('ascii')
             print(f"package: {resp}")
@@ -76,7 +159,7 @@ def networking():
             resp_arr[0] = int(resp_arr[0].split('.')[0])
             resp_arr[1] = int(resp_arr[1].split('.')[0])
             enemyPos = [resp_arr[0], resp_arr[1]]
-            sleep(0.01)
+            sleep(0.005)
             connection = True
 
             if (closing):
@@ -86,58 +169,6 @@ def networking():
 
 network_thread = Thread(target=networking)
 network_thread.start()
-
-
-class Player:
-    playerWidth, playerHeight = (10, 70)
-    rect_offset = (-playerWidth/2, -playerHeight/2)
-
-    def __init__(self, isEnemy):
-        self.x_pos, self.y_pos = pygame.mouse.get_pos()
-        self.x_pos = SCREEN_WIDTH - 100
-        self.rect = pygame.Rect(1, 1, self.playerWidth, self.playerHeight)
-        self.isEnemy = isEnemy
-
-    def update(self):
-        global playerPos
-        if (self.isEnemy == False):
-            #update(left, top, width, height)
-            #self.x_pos, self.y_pos = tuple(map(sum, zip(pygame.mouse.get_pos(), self.rect_offset)))
-            self.y_pos = pygame.mouse.get_pos()[1] + self.rect_offset[1]
-            if(self.x_pos < SCREEN_WIDTH/2):
-                pygame.mouse.set_pos([SCREEN_WIDTH/2, pygame.mouse.get_pos()[1]])
-                self.x_pos = SCREEN_WIDTH/2
-            playerPos[0] = self.x_pos
-            playerPos[1] = self.y_pos
-            self.rect.update(self.x_pos, self.y_pos, self.playerWidth, self.playerHeight)
-            pygame.draw.rect(screen, (255, 255, 255), self.rect)
-        
-        else:
-            self.x_pos = SCREEN_WIDTH - enemyPos[0]
-            self.y_pos = enemyPos[1]
-            self.rect.update(self.x_pos, self.y_pos, self.playerWidth, self.playerHeight)
-            pygame.draw.rect(screen, (255, 0, 0), self.rect)
-
-
-class Ball():
-    def __init__(self):
-        self.x_pos, self.y_pos = (SCREEN_WIDTH/2, SCREEN_HEIGHT/2)
-        self.radius = 5
-        self.speed_x, self.speed_y = (0.8, -0.1)
-        self.delta_t = 0.03
-        self.lastTime = time.time()
-    
-    def update(self):
-        if (time.time() - self.lastTime >= self.delta_t):
-            self.x_pos += self.speed_x
-            self.y_pos += self.speed_y
-            self.lastTime = time.time()
-        pygame.draw.circle(screen, (255, 255, 255), (self.x_pos, self.y_pos), self.radius)
-
-
-player = Player(False)
-enemyPlayer = Player(True)
-ball = Ball()
 
 running = True
 while running:
